@@ -1,0 +1,748 @@
+/* *
+ * Scanner for the class project in COP5556 Programming Language Principles 
+ * at the University of Florida, Fall 2017.
+ * 
+ * This software is solely for the educational benefit of students 
+ * enrolled in the course during the Fall 2017 semester.  
+ * 
+ * This software, and any software derived from it,  may not be shared with others or posted to public web sites,
+ * either during the course or afterwards.
+ * 
+ *  @Beverly A. Sanders, 2017
+  */
+
+package cop5556fa17;
+
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
+
+public class Scanner {
+	
+	@SuppressWarnings("serial")
+	public static class LexicalException extends Exception {
+		
+		int pos;
+
+		public LexicalException(String message, int pos) {
+			super(message);
+			this.pos = pos;
+		}
+		
+		public int getPos() { return pos; }
+
+	}
+
+	public static enum Kind {
+		IDENTIFIER, INTEGER_LITERAL, BOOLEAN_LITERAL, STRING_LITERAL, 
+		KW_x/* x */, KW_X/* X */, KW_y/* y */, KW_Y/* Y */, KW_r/* r */, KW_R/* R */, KW_a/* a */, 
+		KW_A/* A */, KW_Z/* Z */, KW_DEF_X/* DEF_X */, KW_DEF_Y/* DEF_Y */, KW_SCREEN/* SCREEN */, 
+		KW_cart_x/* cart_x */, KW_cart_y/* cart_y */, KW_polar_a/* polar_a */, KW_polar_r/* polar_r */, 
+		KW_abs/* abs */, KW_sin/* sin */, KW_cos/* cos */, KW_atan/* atan */, KW_log/* log */, 
+		KW_image/* image */,  KW_int/* int */, 
+		KW_boolean/* boolean */, KW_url/* url */, KW_file/* file */, OP_ASSIGN/* = */, OP_GT/* > */, OP_LT/* < */, 
+		OP_EXCL/* ! */, OP_Q/* ? */, OP_COLON/* : */, OP_EQ/* == */, OP_NEQ/* != */, OP_GE/* >= */, OP_LE/* <= */, 
+		OP_AND/* & */, OP_OR/* | */, OP_PLUS/* + */, OP_MINUS/* - */, OP_TIMES/* * */, OP_DIV/* / */, OP_MOD/* % */, 
+		OP_POWER/* ** */, OP_AT/* @ */, OP_RARROW/* -> */, OP_LARROW/* <- */, LPAREN/* ( */, RPAREN/* ) */, 
+		LSQUARE/* [ */, RSQUARE/* ] */, SEMI/* ; */, COMMA/* , */, EOF;
+	}
+	
+	public static enum STATE{
+		Start, In_Digit, In_Ident, After_Equals, After_lessThan, After_greaterThan, After_Multi, After_dash, After_Excl, In_String; 
+	}
+	
+
+	/** Class to represent Tokens. 
+	 * 
+	 * This is defined as a (non-static) inner class
+	 * which means that each Token instance is associated with a specific 
+	 * Scanner instance.  We use this when some token methods access the
+	 * chars array in the associated Scanner.
+	 * 
+	 * 
+	 * @author Beverly Sanders
+	 *
+	 */
+	public class Token {
+		public final Kind kind;
+		public final int pos;
+		public final int length;
+		public final int line;
+		public final int pos_in_line;
+
+		public Token(Kind kind, int pos, int length, int line, int pos_in_line) {
+			super();
+			this.kind = kind;
+			this.pos = pos;
+			this.length = length;
+			this.line = line;
+			this.pos_in_line = pos_in_line;
+		}
+
+		public String getText() {
+			if (kind == Kind.STRING_LITERAL) {
+				return chars2String(chars, pos, length);
+			}
+			else return String.copyValueOf(chars, pos, length);
+		}
+
+		/**
+		 * To get the text of a StringLiteral, we need to remove the
+		 * enclosing " characters and convert escaped characters to
+		 * the represented character.  For example the two characters \ t
+		 * in the char array should be converted to a single tab character in
+		 * the returned String
+		 * 
+		 * @param chars
+		 * @param pos
+		 * @param length
+		 * @return
+		 */
+		private String chars2String(char[] chars, int pos, int length) {
+			StringBuilder sb = new StringBuilder();
+			for (int i = pos + 1; i < pos + length - 1; ++i) {// omit initial and final "
+				char ch = chars[i];
+				if (ch == '\\') { // handle escape
+					i++;
+					ch = chars[i];
+					switch (ch) {
+					case 'b':
+						sb.append('\b');
+						break;
+					case 't':
+						sb.append('\t');
+						break;
+					case 'f':
+						sb.append('\f');
+						break;
+					case 'r':
+						sb.append('\r'); //for completeness, line termination chars not allowed in String literals
+						break;
+					case 'n':
+						sb.append('\n'); //for completeness, line termination chars not allowed in String literals
+						break;
+					case '\"':
+						sb.append('\"');
+						break;
+					case '\'':
+						sb.append('\'');
+						break;
+					case '\\':
+						sb.append('\\');
+						break;
+					default:
+						assert false;
+						break;
+					}
+				} else {
+					sb.append(ch);
+				}
+			}
+			return sb.toString();
+		}
+
+		/**
+		 * precondition:  This Token is an INTEGER_LITERAL
+		 * 
+		 * @returns the integer value represented by the token
+		 */
+		public int intVal() {
+			assert kind == Kind.INTEGER_LITERAL;
+			return Integer.valueOf(String.copyValueOf(chars, pos, length));
+		}
+
+		public String toString() {
+			return "[" + kind + "," + String.copyValueOf(chars, pos, length)  + "," + pos + "," + length + "," + line + ","
+					+ pos_in_line + "]";
+		}
+
+		protected boolean isKind(Kind k){
+			return this.kind==k;
+		}
+		/** 
+		 * Since we overrode equals, we need to override hashCode.
+		 * https://docs.oracle.com/javase/8/docs/api/java/lang/Object.html#equals-java.lang.Object-
+		 * 
+		 * Both the equals and hashCode method were generated by eclipse
+		 * 
+		 */
+		@Override
+		public int hashCode() {
+			final int prime = 31;
+			int result = 1;
+			result = prime * result + getOuterType().hashCode();
+			result = prime * result + ((kind == null) ? 0 : kind.hashCode());
+			result = prime * result + length;
+			result = prime * result + line;
+			result = prime * result + pos;
+			result = prime * result + pos_in_line;
+			return result;
+		}
+
+		/**
+		 * Override equals method to return true if other object
+		 * is the same class and all fields are equal.
+		 * 
+		 * Overriding this creates an obligation to override hashCode.
+		 * 
+		 * Both hashCode and equals were generated by eclipse.
+		 * 
+		 */
+		@Override
+		public boolean equals(Object obj) {
+			if (this == obj)
+				return true;
+			if (obj == null)
+				return false;
+			if (getClass() != obj.getClass())
+				return false;
+			Token other = (Token) obj;
+			if (!getOuterType().equals(other.getOuterType()))
+				return false;
+			if (kind != other.kind)
+				return false;
+			if (length != other.length)
+				return false;
+			if (line != other.line)
+				return false;
+			if (pos != other.pos)
+				return false;
+			if (pos_in_line != other.pos_in_line)
+				return false;
+			return true;
+		}
+
+		/**
+		 * used in equals to get the Scanner object this Token is 
+		 * associated with.
+		 * @return
+		 */
+		private Scanner getOuterType() {
+			return Scanner.this;
+		}
+
+	}
+
+	/** 
+	 * Extra character added to the end of the input characters to simplify the
+	 * Scanner.  
+	 */
+	static final char EOFchar = 0;
+	
+	/**
+	 * The list of tokens created by the scan method.
+	 */
+	final ArrayList<Token> tokens;
+	
+	/**
+	 * An array of characters representing the input.  These are the characters
+	 * from the input string plus and additional EOFchar at the end.
+	 */
+	final char[] chars;  
+	
+	/**
+	 * position of the next token to be returned by a call to nextToken
+	 */
+	private int nextTokenPos = 0;
+	
+	Scanner(String inputString) {
+		int numChars = inputString.length();
+		this.chars = Arrays.copyOf(inputString.toCharArray(), numChars + 1); // input string terminated with null char
+		chars[numChars] = EOFchar;
+		/*int i=0;
+		for(char c: chars)
+		{
+			System.out.println("Character read is: <"+(c)+">, at pos: "+i++);
+		}
+		*/tokens = new ArrayList<Token>();
+	}
+
+
+	/**
+	 * Method to scan the input and create a list of Tokens.
+	 * 
+	 * If an error is encountered during scanning, throw a LexicalException.
+	 * 
+	 * @return
+	 * @throws LexicalException
+	 */
+	public Scanner scan() throws LexicalException {
+		/* TODO  Replace this with a correct and complete implementation!!! */
+		int pos = 0;
+		int line = 1;
+		int posInLine = 1;
+		char ch;
+		//initalise all maps
+		HashMap<Character, Integer> map = new HashMap<>();
+		map.put('n', 0);map.put('\'', 0);map.put('r', 0);map.put('b', 0);map.put('t', 0);map.put('f', 0);
+		HashMap<String, Kind> kwMap = new HashMap<>();
+		kwMap = initKwMap(kwMap);
+		HashMap<Character, Integer> identMap = new HashMap<>();
+		identMap = initIdentMap(identMap);
+		
+		int startPos = 0;
+		STATE state = STATE.Start;
+		int arr[]=new int[2];
+		while(checkLength(pos))
+		{
+			switch(state){
+			case Start:{
+				startPos=pos;
+				if(!checkLength(pos))
+					break;
+				ch = chars[pos];
+				switch(ch){
+					
+					/* -------------- CASE FOR SEPARATORS START -------------------------------- */
+				
+					case ';':  
+						tokens.add(new Token(Kind.SEMI, pos++, 1, line, posInLine++));
+						break;
+					
+					case '(': tokens.add(new Token(Kind.LPAREN, pos++, 1, line, posInLine++));
+						break;
+					
+					case ')': tokens.add(new Token(Kind.RPAREN, pos++, 1, line, posInLine++));
+						break;
+					
+					case '[': tokens.add(new Token(Kind.LSQUARE, pos++, 1, line, posInLine++));
+						break;
+					
+					case ']': tokens.add(new Token(Kind.RSQUARE, pos++, 1, line, posInLine++));
+						break;
+					
+					case ',': tokens.add(new Token(Kind.COMMA, pos++, 1, line, posInLine++));
+						break;
+				
+					/* -------------- CASE FOR SEPARATORS END -------------------------------- */
+					
+				
+					
+					/* -------------- CASE FOR OPERATORS START -------------------------------- */
+					
+					case '=': state=STATE.After_Equals;
+						pos++;
+						break;
+				
+					case '<': state=STATE.After_lessThan;
+						pos++;
+						break;
+					
+					case '>': state=STATE.After_greaterThan;
+						pos++;
+						break;
+					
+					case '!': state=STATE.After_Excl;
+						pos++;
+						break;
+					
+					case '?': tokens.add(new Token(Kind.OP_Q, pos++, 1, line, posInLine++));
+						break;
+				
+					case ':': tokens.add(new Token(Kind.OP_COLON, pos++, 1, line, posInLine++));
+						break;
+				
+					case '&': tokens.add(new Token(Kind.OP_AND, pos++, 1, line, posInLine++));
+						break;
+		
+					case '|': tokens.add(new Token(Kind.OP_OR, pos++,1, line, posInLine++));
+						break;
+		
+					case '+': tokens.add(new Token(Kind.OP_PLUS, pos++, 1, line, posInLine++));
+						break;
+			
+					case '-': state=STATE.After_dash;
+						pos++;
+						break;
+			
+					case '*': state=STATE.After_Multi;
+						pos++;
+						break;
+			
+					case '/': 
+						if(pos<chars.length-1 && chars[pos+1]=='/'){
+							arr=new int[2];
+							arr = skipComment(pos,posInLine);
+							pos = arr[0];
+							posInLine=arr[1];
+						}else
+							tokens.add(new Token(Kind.OP_DIV, pos++, 1, line, posInLine++));
+						break;
+						
+					case '%': tokens.add(new Token(Kind.OP_MOD, pos++, 1, line, posInLine++));
+						break;
+						
+					case '@': tokens.add(new Token(Kind.OP_AT, pos++, 1, line, posInLine++));
+						break;
+						
+					/* -------------- CASE FOR OPERATORS END -------------------------------- */
+					
+					
+					/* -------------- CASE FOR WHITESPACE AND NEW LINE -------------------------------- */
+						
+					case ' ':
+						arr=new int[2];
+						arr = skipWhiteSpace(pos,posInLine);
+						pos = arr[0];
+						posInLine=arr[1];
+					
+						break;
+					
+					case '\t':
+						arr=new int[2];
+						arr = skipWhiteSpace(pos,posInLine);
+						pos = arr[0];
+						posInLine=arr[1];
+						break;
+					
+					case '\f':
+						arr=new int[2];
+						arr = skipWhiteSpace(pos,posInLine);
+						pos = arr[0];
+						posInLine=arr[1];
+						break;
+						
+					case '\n': 	pos++; line++; posInLine=1;
+								break;
+					
+					case '\r': 	if(chars[pos+1]=='\n')
+								{
+									pos++;
+								}
+								pos++; line++; posInLine=1;
+								break;
+				
+					/* -------------- CASE FOR WHITESPACE AND NEW LINE ENDS-------------------------------- */
+								
+					case '0' : tokens.add(new Token(Kind.INTEGER_LITERAL, pos++, 1, line, posInLine++));
+						break;
+					
+					case '"' : pos++;
+							state = STATE.In_String;
+					break;
+					
+					case EOFchar :	
+							pos=chars.length; 
+							break; 			
+					
+					default:
+						if(Character.isDigit(ch)){
+							state = STATE.In_Digit;
+							break;
+						}
+						else
+						if(identMap.containsKey(chars[pos])){
+							state = STATE.In_Ident;
+							break;
+						}
+						else{
+							throw new LexicalException("The input character is illegal at line: "+line+", position: "+posInLine, pos);
+						}
+				}
+			}
+			break;
+			
+			case In_Digit:
+				if(Character.isDigit(chars[pos])){
+					pos++;
+				}
+				else
+				{
+					StringBuilder sb = new StringBuilder();
+					for(int i=startPos;i<pos;i++)
+						sb.append(chars[i]);
+					
+					String s = sb.toString();
+					try{
+						Integer.parseInt(s);
+					}
+					catch(NumberFormatException e)
+					{
+						throw new LexicalException("Error! Line: "+line+", position: "+(posInLine)+". \nReason: Integer out of range.", startPos);
+					}
+					tokens.add(new Token(Kind.INTEGER_LITERAL, startPos, pos-startPos,line,posInLine));
+					state=STATE.Start;
+					posInLine = posInLine + pos-startPos;
+				}
+				break;
+				
+			case In_Ident:
+				if(identMap.containsKey(chars[pos]) || Character.isDigit(chars[pos])&&chars[pos]!=EOFchar){
+					pos++;
+				}
+				else
+				{
+					StringBuilder sb = new StringBuilder();
+					for(int i=startPos;i<pos;i++)
+					{
+						sb.append(chars[i]);
+					}
+					String s = sb.toString();
+					if(kwMap.containsKey(s))
+					{
+						tokens.add(new Token(kwMap.get(s), startPos, pos-startPos,line,posInLine));
+					}
+					else
+						tokens.add(new Token(Kind.IDENTIFIER, startPos, pos-startPos,line,posInLine));
+					state=STATE.Start;
+					posInLine= posInLine + pos-startPos;
+				}
+				break;
+				
+			case After_Equals: 
+				if(chars[pos]=='=')
+					tokens.add(new Token(Kind.OP_EQ, startPos, ++pos-startPos,line,posInLine));
+				else
+					tokens.add(new Token(Kind.OP_ASSIGN, startPos, pos-startPos,line,posInLine));
+				state=STATE.Start;
+				posInLine= posInLine + pos-startPos;
+				break;	
+			
+			case After_Excl: 
+				if(chars[pos]=='=')
+					tokens.add(new Token(Kind.OP_NEQ, startPos, ++pos-startPos,line,posInLine));
+				else
+					tokens.add(new Token(Kind.OP_EXCL, startPos, pos-startPos,line,posInLine));
+				state=STATE.Start;
+				posInLine= posInLine + pos-startPos;
+				break;	
+			
+			case After_lessThan: 
+				if(chars[pos]=='=')
+					tokens.add(new Token(Kind.OP_LE, startPos, ++pos-startPos,line,posInLine));
+				else if(chars[pos]=='-')
+					tokens.add(new Token(Kind.OP_LARROW, startPos, ++pos-startPos,line,posInLine));
+				else
+					tokens.add(new Token(Kind.OP_LT, startPos, pos-startPos,line,posInLine));
+				state=STATE.Start;
+				posInLine= posInLine + pos-startPos;
+				break;	
+			
+			case After_greaterThan: 
+				if(chars[pos]=='=')
+					tokens.add(new Token(Kind.OP_GE, startPos, ++pos-startPos,line,posInLine));
+				else
+					tokens.add(new Token(Kind.OP_GT, startPos, pos-startPos,line,posInLine));
+				state=STATE.Start;
+				posInLine= posInLine + pos-startPos;
+				break;	
+			
+			case After_Multi: 
+				if(chars[pos]=='*')
+					tokens.add(new Token(Kind.OP_POWER, startPos, ++pos-startPos,line,posInLine));
+				else
+					tokens.add(new Token(Kind.OP_TIMES, startPos, pos-startPos,line,posInLine));
+				state=STATE.Start;
+				posInLine= posInLine + pos-startPos;
+				break;	
+			
+			case After_dash: 
+				if(chars[pos]=='>')
+					tokens.add(new Token(Kind.OP_RARROW, startPos, ++pos-startPos,line,posInLine));
+				else
+					tokens.add(new Token(Kind.OP_MINUS, startPos, pos-startPos,line,posInLine));
+				state=STATE.Start;
+				posInLine= posInLine + pos-startPos;
+				break;
+				
+			case In_String:
+			
+				while(chars[pos]!='"')
+				{
+					if(!(chars[pos]>=0 && chars[pos]<=127))
+					{
+						throw new LexicalException("Error! Line: "+line+", position: "+(posInLine+pos-startPos)+".\nReason: Invalid Ascii Character", pos);
+					}
+				
+					if(chars[pos]=='\\' && checkLength(pos))
+					{
+						int p=pos+1;
+						if(chars[p]=='\\' || chars[p]=='\"')
+						{
+							pos++;
+						}
+						else if(!map.containsKey(chars[p]))
+						{
+							throw new LexicalException("Error! Line: "+line+", position: "+(posInLine+pos-startPos)+".\nReason: \\ is not allowed", p);
+						}
+						
+					}
+					else if(chars[pos]=='\n'||chars[pos]=='\r' || pos==chars.length-1){
+						throw new LexicalException("Error! Line: "+line+", position: "+(posInLine+pos-startPos)+".\nReason: Invalid String format", pos);
+					}
+					pos++;
+				}
+				tokens.add(new Token(Kind.STRING_LITERAL, startPos, ++pos-startPos,line,posInLine));
+				state=STATE.Start;
+				posInLine = posInLine + pos-startPos;
+				break;
+				
+			}
+		}
+		tokens.add(new Token(Kind.EOF, --pos, 0, line, posInLine));
+		return this;
+	}
+	
+	/** Method to initialize map with Keyword and its enum value
+	 * 
+	 * @param map
+	 * @return map containing keywords and its enum value
+	 */
+	private HashMap<String, Kind> initKwMap(HashMap<String, Kind> map) {
+		// TODO Auto-generated method stub
+		map.put("x", Kind.KW_x);
+		map.put("X", Kind.KW_X);
+		map.put("y", Kind.KW_y);
+		map.put("Y", Kind.KW_Y);
+		map.put("r", Kind.KW_r);
+		map.put("R", Kind.KW_R);
+		map.put("a", Kind.KW_a);
+		map.put("A", Kind.KW_A);
+		map.put("Z", Kind.KW_Z);
+		map.put("abs", Kind.KW_abs);
+		map.put("sin", Kind.KW_sin);
+		map.put("cos", Kind.KW_cos);
+		map.put("atan", Kind.KW_atan);
+		map.put("log", Kind.KW_log);
+		map.put("image", Kind.KW_image);
+		map.put("int", Kind.KW_int);
+		map.put("boolean", Kind.KW_boolean);
+		map.put("url", Kind.KW_url);
+		map.put("file", Kind.KW_file);
+		map.put("DEF_X", Kind.KW_DEF_X);
+		map.put("DEF_Y", Kind.KW_DEF_Y);
+		map.put("SCREEN", Kind.KW_SCREEN);
+		map.put("cart_x", Kind.KW_cart_x);
+		map.put("cart_y", Kind.KW_cart_y);
+		map.put("polar_a", Kind.KW_polar_a);
+		map.put("polar_r", Kind.KW_polar_r);
+		map.put("true", Kind.BOOLEAN_LITERAL);
+		map.put("false", Kind.BOOLEAN_LITERAL);
+		return map;
+	}
+	
+	/**
+	 * Method initalises map for valid identifier literals
+	 * @params: map<Character, Integer>;
+	 * @return: initialised map;
+	*/
+	
+	private HashMap<Character, Integer> initIdentMap(HashMap<Character, Integer> map) {
+		for(int i=0;i<=25;i++)
+			map.put((char) ('a'+i),0);
+		for(int i=0;i<=25;i++)
+			map.put((char) ('A'+i),0);
+		map.put('$',0);
+		map.put('_', 0);
+		return map;
+	}
+
+	/**
+	 * Method checks and ignores comments
+	 * @params: pos - position and positioninline  of the character to be read;
+	 * @return: the position and positioninline after the comment has been read;
+	*/
+	private int[] skipComment(int pos, int posInLine) {
+		// TODO Auto-generated method stub
+		int arr[]=new int[]{pos,posInLine};
+		if(pos<chars.length-2 && chars[pos]=='/'&&chars[pos+1]=='/')
+		{
+			pos++;
+			posInLine++;
+			while(checkLength(pos) && (chars[pos]!='\n'&&chars[pos]!='\r'))
+			{
+				pos++;
+			}
+			arr[0]=pos;
+			arr[1]=1;
+		}
+		return arr;
+	}
+
+	/**
+	 * Method checks and ignores whitespaces
+	 * @params: pos - position and positioninline  of the character to be read;
+	 * @return: the position and positioninline after the comment has been read;
+	*/
+	
+	public int[] skipWhiteSpace(int pos, int posInLine){
+		while(checkLength(pos) && (chars[pos] ==32 | chars[pos] == '\t' | chars[pos]=='\f'))
+		{
+			pos++;
+			posInLine++;
+		}
+		return new int[]{pos,posInLine};
+	}
+	
+	/**
+	 * Method checks and returns if the cursor is at the end of the string
+	 * @params: pos - position of the character to be read;
+	 * @return: boolean result indicating whether the cursor is at end or not;
+	*/
+	
+	public boolean checkLength(int pos)
+	{
+		return pos<chars.length;
+	}
+
+	/**
+	 * Returns true if the internal interator has more Tokens
+	 * 
+	 * @return
+	 */
+	public boolean hasTokens() {
+		return nextTokenPos < tokens.size();
+	}
+
+	/**
+	 * Returns the next Token and updates the internal iterator so that
+	 * the next call to nextToken will return the next token in the list.
+	 * 
+	 * It is the callers responsibility to ensure that there is another Token.
+	 * 
+	 * Precondition:  hasTokens()
+	 * @return
+	 */
+	public Token nextToken() {
+		return tokens.get(nextTokenPos++);
+	}
+	
+	/**
+	 * Returns the next Token, but does not update the internal iterator.
+	 * This means that the next call to nextToken or peek will return the
+	 * same Token as returned by this methods.
+	 * 
+	 * It is the callers responsibility to ensure that there is another Token.
+	 * 
+	 * Precondition:  hasTokens()
+	 * 
+	 * @return next Token.
+	 */
+	public Token peek() {
+		return tokens.get(nextTokenPos);
+	}
+	
+	
+	/**
+	 * Resets the internal iterator so that the next call to peek or nextToken
+	 * will return the first Token.
+	 */
+	public void reset() {
+		nextTokenPos = 0;
+	}
+
+	/**
+	 * Returns a String representation of the list of Tokens 
+	 */
+	public String toString() {
+		StringBuffer sb = new StringBuffer();
+		sb.append("Tokens:\n");
+		for (int i = 0; i < tokens.size(); i++) {
+			sb.append(tokens.get(i)).append('\n');
+		}
+		return sb.toString();
+	}
+
+}
